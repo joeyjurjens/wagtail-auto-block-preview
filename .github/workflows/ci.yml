@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run ty check wagtail_auto_block_preview/
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        wagtail-version: ["6.3", "7.4"]
+        include:
+          - wagtail-version: "6.3"
+            django-version: "5.1"
+          - wagtail-version: "7.4"
+            django-version: "5.2"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync
+      - run: uv add django==${{ matrix.django-version }} wagtail==${{ matrix.wagtail-version }}
+      - run: uv run pytest tests/

@@ -1,0 +1,5 @@
+{% load wagtailcore_tags %}
+<h1>{{ value.title }}</h1>
+<div class="content">{% include_block value.content %}</div>
+<img src="{{ value.image }}" alt="">
+<div class="video">{{ value.video }}</div>

@@ -38,6 +38,15 @@ def _try_faker(child_block: Block) -> Any:
         return _NOT_FAKED
 
 
+def _evaluate_callable(value: Any) -> Any:
+    # Wagtail's own Block._evaluate_callable does exactly this, but only
+    # exists from Wagtail ~7.3 onward — Wagtail 7.0's get_preview_value()
+    # doesn't support a callable preview_value at all. Inlined so a
+    # callable Meta.preview_value works on every Wagtail version this
+    # package supports.
+    return value() if callable(value) else value
+
+
 def _has_explicit_default(block: Block) -> bool:
     # hasattr(block.meta, "default") is always True — every Block declares
     # a base Meta.default = None — so it can't tell "explicitly set" from
@@ -54,8 +63,16 @@ def _resolve_child_value(child_block: Block) -> Any:
     preview_value/default, else a registered faker, else its own native
     get_preview_value(). Shared by StructBlock (once per named field) and
     ListBlock (once per generated item) — same rule, one place.
+
+    An explicit preview_value is evaluated here rather than delegated to
+    child_block.get_preview_value() — most child blocks (CharBlock, etc.)
+    are plain Wagtail blocks, not this module's StructBlock/ListBlock, so
+    their own get_preview_value() only supports a callable preview_value
+    from Wagtail ~7.3 onward.
     """
-    if hasattr(child_block.meta, "preview_value") or _has_explicit_default(child_block):
+    if hasattr(child_block.meta, "preview_value"):
+        return child_block.normalize(_evaluate_callable(child_block.meta.preview_value))
+    if _has_explicit_default(child_block):
         return child_block.get_preview_value()
     faked = _try_faker(child_block)
     return faked if faked is not _NOT_FAKED else child_block.get_preview_value()
@@ -96,7 +113,7 @@ class StructBlock(WagtailStructBlock):
 
     def get_preview_value(self) -> dict:
         if hasattr(self.meta, "preview_value"):
-            return self.normalize(self._evaluate_callable(self.meta.preview_value))
+            return self.normalize(_evaluate_callable(self.meta.preview_value))
         if getattr(self.meta, "fake", True) is False:
             return super().get_preview_value()
 
@@ -138,7 +155,7 @@ class ListBlock(WagtailListBlock):
 
     def get_preview_value(self) -> list:
         if hasattr(self.meta, "preview_value"):
-            return self.normalize(self._evaluate_callable(self.meta.preview_value))
+            return self.normalize(_evaluate_callable(self.meta.preview_value))
         if getattr(self.meta, "fake", True) is False:
             return super().get_preview_value()
 

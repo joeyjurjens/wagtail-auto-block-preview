@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('testapp', '0001_initial'),
-        ('wagtailcore', '0097_baselogentry_uuid_action_timestamp_indexes'),
+        ('wagtailcore', '0001_initial'),
     ]
 
     operations = [

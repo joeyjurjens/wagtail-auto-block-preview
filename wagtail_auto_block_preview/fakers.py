@@ -36,12 +36,22 @@ DEFAULT_IMAGE_WIDTH = 800
 DEFAULT_IMAGE_HEIGHT = 600
 
 
+class PlaceholderImage(str):
+    """A data-URI that renders as a string but still takes an attribute.
+
+    Wagtail's own `ImageBlock` assigns `contextual_alt_text`/`decorative` onto
+    whatever its `image` child resolved to, which a plain `str` refuses. A
+    subclass carries a `__dict__`, so the placeholder survives that step and is
+    still just a URL everywhere else.
+    """
+
+
 def fake_image(
     width: int | None = None,
     height: int | None = None,
     ratio: str | None = None,
     label: str | None = None,
-) -> str:
+) -> PlaceholderImage:
     """
     A data-URI SVG placeholder of the given size — a labelled grey box, no
     database row, no static file, no urls.py wiring. Deliberately never
@@ -66,7 +76,7 @@ def fake_image(
         f"</svg>"
     )
     encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
-    return f"data:image/svg+xml;base64,{encoded}"
+    return PlaceholderImage(f"data:image/svg+xml;base64,{encoded}")
 
 
 def _resolve_image_dimensions(

@@ -53,13 +53,29 @@ class HeroBlock(StructBlock):
 
 This package's `ListBlock` works the same way as `StructBlock` — subclass it instead of Wagtail's own to get a few fake items generated instead of the single default-valued one Wagtail's own `get_default()` produces. A `ListBlock`'s item type is singular and known, so each item is resolved the same way a `StructBlock` field is (item count: at least `min_num`, capped at `max_num`, 2 by default). `Meta.fake = False` disables generation the same way.
 
-There's no faking `StreamBlock` — its content is an open-ended, editor-chosen set, so there's no principled way to auto-pick which block types to fake and in what combination. Hint it explicitly on the field instead, same as any other field-level override:
+This package's `StreamBlock` needs one hint, because a stream is an open-ended, editor-chosen sequence: which types, in what order, how many. Name them and each one is filled by the same per-block resolution a `StructBlock` field gets:
 
 ```python
-content = ContentStreamBlock(
-    default=[("heading", "Section heading"), ("rich_text", "<p>Example copy.</p>")],
-)
+from wagtail_auto_block_preview import StreamBlock
+
+
+class ContentStreamBlock(StreamBlock):
+    heading = blocks.CharBlock()
+    rich_text = blocks.RichTextBlock()
+
+    class Meta:
+        preview_blocks = ["heading", "rich_text", "rich_text"]
 ```
+
+Repetition is meaningful — two `rich_text` entries are two paragraphs. Because only the *names* are listed, a child block that gains a field, or one a project registers a faker for, is picked up without touching this list.
+
+`preview_blocks` also works as a constructor argument, which is the usual case when the stream's children come from a registry rather than a class body:
+
+```python
+content = ContentStreamBlock(preview_blocks=["heading", "rich_text"])
+```
+
+A name no child block matches is skipped rather than raising, so a stream whose types are contributed by a plugin can name one without depending on it. Without `preview_blocks` you get Wagtail's own behaviour — an empty stream. `Meta.fake = False` and an explicit `preview_value` behave as they do everywhere else.
 
 ### Choosers
 

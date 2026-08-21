@@ -15,13 +15,15 @@ from wagtail.images.blocks import ImageChooserBlock
 from wagtail.models import Page
 from wagtail_auto_block_preview import (
     FabricatedFaker,
-    ListBlock,
-    StructBlock,
+    ListBlockPreviewMixin,
+    StreamBlockPreviewMixin,
+    StructBlockPreviewMixin,
     ValueFaker,
     fabricated,
     fake_image,
     render_in_sandbox,
 )
+from wagtail_auto_block_preview.blocks import ListBlock, StreamBlock, StructBlock
 from wagtail_auto_block_preview.core import FakerRegistry, SignalRegistry, muted_signals, registry
 from wagtail_auto_block_preview.fakers import DEFAULT_IMAGE_HEIGHT, DEFAULT_IMAGE_WIDTH
 
@@ -226,6 +228,99 @@ class ListBlockTests(TestCase):
         self.assertEqual(len(value), 2)
         self.assertTrue(all(item.name == "listed" for item in value))
         self.assertEqual(Widget.objects.count(), 0)
+
+
+class ProseStreamBlock(StreamBlock):
+    heading = blocks.CharBlock()
+    rich_text = blocks.RichTextBlock()
+    address = AddressBlock()
+
+
+class StreamBlockTests(SimpleTestCase):
+    def test_without_preview_blocks_nothing_is_generated(self):
+        self.assertEqual(len(ProseStreamBlock().get_preview_value()), 0)
+
+    def test_named_blocks_are_filled(self):
+        block = ProseStreamBlock(preview_blocks=["heading", "rich_text"])
+        value = block.get_preview_value()
+        self.assertEqual([child.block_type for child in value], ["heading", "rich_text"])
+        self.assertTrue(all(child.value for child in value))
+
+    def test_order_and_repetition_follow_the_list(self):
+        block = ProseStreamBlock(preview_blocks=["rich_text", "heading", "rich_text"])
+        value = block.get_preview_value()
+        self.assertEqual(
+            [child.block_type for child in value],
+            ["rich_text", "heading", "rich_text"],
+        )
+
+    def test_nested_struct_children_are_resolved_too(self):
+        block = ProseStreamBlock(preview_blocks=["address"])
+        address = block.get_preview_value()[0].value
+        self.assertTrue(address["street"])
+        self.assertTrue(address["city"])
+
+    def test_unknown_names_are_skipped(self):
+        block = ProseStreamBlock(preview_blocks=["heading", "not_registered"])
+        value = block.get_preview_value()
+        self.assertEqual([child.block_type for child in value], ["heading"])
+
+    def test_explicit_preview_value_skips_generation(self):
+        block = ProseStreamBlock(
+            preview_blocks=["heading"],
+            preview_value=[{"type": "rich_text", "value": "<p>Chosen.</p>"}],
+        )
+        value = block.get_preview_value()
+        self.assertEqual([child.block_type for child in value], ["rich_text"])
+
+    def test_fake_false_disables_generation(self):
+        block = ProseStreamBlock(preview_blocks=["heading"], fake=False)
+        self.assertEqual(len(block.get_preview_value()), 0)
+
+
+class ImageBlockFakerTests(SimpleTestCase):
+    def test_wagtails_own_image_block_gets_a_placeholder(self):
+        """It is a Wagtail StructBlock, so it never fakes itself — without a
+        registered faker every preview holding one renders no image."""
+        from wagtail.images.blocks import ImageBlock as WagtailImageBlock
+
+        class Card(StructBlock):
+            image = WagtailImageBlock()
+
+        self.assertTrue(Card().get_preview_value()["image"])
+
+
+class BlockProxy:
+    """Minimal stand-in for wagtail-block-reference's `BlockReference`: forwards
+    everything to its target and reports the target's type via `__class__`, the
+    way Django's LazyObject does. `type()` still sees the proxy."""
+
+    def __init__(self, target):
+        self._target = target
+
+    @property
+    def __class__(self):
+        return self._target.__class__
+
+    def __getattr__(self, name):
+        if name == "_target":
+            raise AttributeError(name)
+        return getattr(self._target, name)
+
+
+class ProxiedStreamBlock(StreamBlock):
+    rich_text = blocks.RichTextBlock()
+
+
+class ProxiedChildTests(SimpleTestCase):
+    def test_faker_resolves_through_a_proxy(self):
+        block = ProxiedStreamBlock(preview_blocks=["rich_text"])
+        block.child_blocks["rich_text"] = BlockProxy(blocks.RichTextBlock())
+        value = block.get_preview_value()
+        self.assertTrue(
+            value[0].value.source,
+            "a proxied child must still reach its registered faker",
+        )
 
 
 class SpecialCharBlock(blocks.CharBlock):
@@ -725,3 +820,35 @@ class FakeImageTests(SimpleTestCase):
         svg = self._decode(fake_image(width=100, height=100, label="Hero"))
         self.assertIn("Hero", svg)
         self.assertNotIn("100 × 100", svg)
+
+
+class PreviewMixinTests(SimpleTestCase):
+    """The behaviour is reachable as a mixin, not only through these classes.
+
+    A project that wants automatic previews on *every* block wants to apply the
+    mixin to Wagtail's own classes rather than subclass ours. The mixin makes that
+    expressible — but see `test_injecting_conflicts_with_the_concrete_classes`:
+    the two ways of using this package are mutually exclusive.
+    """
+
+    def test_the_concrete_blocks_are_built_from_the_mixins(self):
+        self.assertTrue(issubclass(StructBlock, StructBlockPreviewMixin))
+        self.assertTrue(issubclass(ListBlock, ListBlockPreviewMixin))
+        self.assertTrue(issubclass(StreamBlock, StreamBlockPreviewMixin))
+
+    def test_the_mixin_carries_the_behaviour(self):
+        """Nothing is left on the concrete class."""
+        self.assertIn("get_preview_value", vars(StructBlockPreviewMixin))
+        self.assertNotIn("get_preview_value", vars(StructBlock))
+
+    def test_injecting_conflicts_with_the_concrete_classes(self):
+        """Subclassing and injecting cannot both be used in one process.
+
+        `StructBlock(StructBlockPreviewMixin, WagtailStructBlock)` fixes the mixin
+        *before* Wagtail's class in its linearisation; making Wagtail's class
+        inherit the mixin would put it *after*. Python rejects the contradiction
+        whichever order the two are created in — so a project that wants the mixin
+        on `wagtail.blocks.StructBlock` must not have these classes defined.
+        """
+        with self.assertRaises(TypeError):
+            blocks.StructBlock.__bases__ = (StructBlockPreviewMixin,) + blocks.StructBlock.__bases__

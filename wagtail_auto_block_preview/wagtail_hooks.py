@@ -10,8 +10,9 @@ from .fakers import (
 )
 
 try:
-    from wagtail.images.blocks import ImageChooserBlock
+    from wagtail.images.blocks import ImageBlock, ImageChooserBlock
 except ImportError:  # wagtail.images not installed
+    ImageBlock: type | None = None
     ImageChooserBlock: type | None = None
 
 try:
@@ -35,6 +36,14 @@ def register_builtin_fakers():
     fakers = dict(BUILTIN_FAKERS)
     if ImageChooserBlock is not None:
         fakers[ImageChooserBlock] = lambda block: fake_image()
+    if ImageBlock is not None:
+        # A Wagtail StructBlock, so it never fakes itself. Its normalize() takes
+        # the child dict rather than a bare value, and turns it into the image.
+        fakers[ImageBlock] = lambda block: {
+            "image": fake_image(),
+            "decorative": True,
+            "alt_text": "",
+        }
     if DocumentChooserBlock is not None:
         fakers[DocumentChooserBlock] = documentchooserblock_faker
     if EmbedBlock is not None:
